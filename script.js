@@ -1,5 +1,5 @@
-// マトリックス風文字セット（半角カタカナと数字）
-const matrixChars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
+// マトリックス風文字セット（半角カタカナ、英語、数字）
+const matrixChars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz譁�ｭ怜喧縺繝昴繝繝遺促隕也阜縺ｮ蜈諤匁悶縺弱蜉ｩ縺代※縺上蜷梧悄逕溘0123456789';
 
 let video = null;
 let canvas = null;
@@ -7,56 +7,22 @@ let ctx = null;
 let stream = null;
 let animationId = null;
 let charSize = 8; // 文字のサイズ（ピクセル）
-let net = null; // BodyPixモデル
-let isModelLoading = false;
 
 // DOM要素の取得（DOMContentLoaded後に実行）
-let startBtn, stopBtn, videoElement, canvasElement, loadingElement;
-
-// BodyPixモデルの読み込み
-async function loadBodyPixModel() {
-    if (net || isModelLoading) return net;
-    
-    isModelLoading = true;
-    if (loadingElement) loadingElement.style.display = 'block';
-    
-    try {
-        console.log('BodyPixモデルを読み込んでいます...');
-        net = await bodyPix.load({
-            architecture: 'MobileNetV1',
-            outputStride: 16,
-            multiplier: 0.75,
-            quantBytes: 2
-        });
-        console.log('BodyPixモデルの読み込みが完了しました');
-        if (loadingElement) loadingElement.style.display = 'none';
-        isModelLoading = false;
-        return net;
-    } catch (error) {
-        console.error('BodyPixモデルの読み込みに失敗しました:', error);
-        alert('人物検出モデルの読み込みに失敗しました。ページを再読み込みしてください。');
-        if (loadingElement) loadingElement.style.display = 'none';
-        isModelLoading = false;
-        return null;
-    }
-}
+let startBtn, stopBtn, videoElement, canvasElement;
 
 // DOMが読み込まれた後に初期化
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
     startBtn = document.getElementById('startBtn');
     stopBtn = document.getElementById('stopBtn');
     videoElement = document.getElementById('video');
     canvasElement = document.getElementById('matrixCanvas');
-    loadingElement = document.getElementById('loading');
     
     // Canvasの初期サイズを設定（最小サイズ）
     if (canvasElement) {
         canvasElement.width = 640;
         canvasElement.height = 480;
     }
-    
-    // BodyPixモデルを事前に読み込む
-    await loadBodyPixModel();
     
     // イベントリスナー
     if (startBtn) startBtn.addEventListener('click', startCamera);
@@ -69,18 +35,6 @@ window.addEventListener('beforeunload', stopCamera);
 // カメラ起動
 async function startCamera() {
     try {
-        // BodyPixモデルが読み込まれていない場合は読み込む
-        if (!net) {
-            if (loadingElement) loadingElement.style.display = 'block';
-            await loadBodyPixModel();
-            if (loadingElement) loadingElement.style.display = 'none';
-        }
-        
-        if (!net) {
-            alert('人物検出モデルが読み込めませんでした。ページを再読み込みしてください。');
-            return;
-        }
-        
         // カメラストリームを取得
         stream = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -177,8 +131,8 @@ function getCharFromBrightness(brightness) {
 }
 
 // マトリックス風エフェクトで描画
-async function renderMatrix() {
-    if (!video || !ctx || !canvas || !net) return;
+function renderMatrix() {
+    if (!video || !ctx || !canvas) return;
     
     // ビデオのサイズが有効かチェック
     if (video.videoWidth === 0 || video.videoHeight === 0 || 
@@ -203,29 +157,13 @@ async function renderMatrix() {
         return;
     }
     
-    // 人物セグメンテーションを実行
-    let segmentation;
-    try {
-        segmentation = await net.segmentPerson(tempCanvas, {
-            flipHorizontal: false,
-            internalResolution: 'medium',
-            segmentationThreshold: 0.7
-        });
-    } catch (e) {
-        console.error('セグメンテーションエラー:', e);
-        // エラーが発生した場合、通常の映像を表示
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        animationId = requestAnimationFrame(renderMatrix);
-        return;
-    }
-    
-    // 背景（通常の映像）を先に描画
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
     // 画像データを取得
     const imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
-    const mask = segmentation.data; // 人物マスク（1が人物、0が背景）
+
+    // Canvasをクリア
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // 文字を描画
     ctx.font = `${charSize}px 'Courier New', monospace`;
@@ -238,13 +176,9 @@ async function renderMatrix() {
     for (let y = 0; y < canvas.height; y += step) {
         for (let x = 0; x < canvas.width; x += step) {
             const index = (y * canvas.width + x) * 4;
-            const maskIndex = y * canvas.width + x;
             
             // インデックスが範囲内かチェック
-            if (index + 2 >= data.length || maskIndex >= mask.length) continue;
-            
-            // 人物部分のみにエフェクトを適用
-            if (mask[maskIndex] === 0) continue; // 背景部分はスキップ
+            if (index + 2 >= data.length) continue;
             
             // RGB値を取得
             const r = data[index];
@@ -264,7 +198,7 @@ async function renderMatrix() {
             // ネオングリーンの色を設定（明度に応じて強度を変える）
             ctx.fillStyle = `rgba(0, ${Math.floor(greenIntensity)}, ${Math.floor(greenIntensity * 0.25)}, ${alpha})`;
             
-            // 文字を描画（人物部分のみ）
+            // 文字を描画
             ctx.fillText(char, x + step / 2, y + step / 2);
         }
     }
@@ -280,4 +214,3 @@ function startRendering() {
     }
     renderMatrix();
 }
-
